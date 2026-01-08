@@ -116,10 +116,15 @@ def evaluate_with_metrics(model, dataloader, device, k_values=[5, 10]):
     
     metrics = {
         'auc': auc,
+        'mrr': np.mean(mrr_scores[10]),
+        'ndcg@5': np.mean(ndcg_scores[5]),
+        'ndcg@10': np.mean(ndcg_scores[10]),
     }
-    
-    for k in k_values:
-        metrics[f'mrr@{k}'] = np.mean(mrr_scores[k])
-        metrics[f'ndcg@{k}'] = np.mean(ndcg_scores[k])
+
+    print(f"Validation Metrics:")
+    print(f"  AUC: {metrics['auc']:.4f}")
+    print(f"  MRR: {metrics['mrr']:.4f}")
+    print(f"  NDCG@5: {metrics['ndcg@5']:.4f}")
+    print(f"  NDCG@10: {metrics['ndcg@10']:.4f}")
     
     return metrics

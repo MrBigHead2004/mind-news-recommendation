@@ -27,7 +27,7 @@ config = {
     'BEHAVIORS_TRAIN_PATH': str(DATA_PATHS['behaviors_train']),
     'BEHAVIORS_VAL_PATH': str(DATA_PATHS['behaviors_val']),
     'CHECKPOINT_PATH': str(DATA_PATHS['checkpoint']),
-    
+
     # Model Settings
     'MODEL_NAME': 'roberta-base',
     'EMBEDDING_DIM': 768,
@@ -38,14 +38,14 @@ config = {
     'MAX_HISTORY_LEN': 20,
     'NEG_SAMPLES': 4,
     'BATCH_SIZE': 8,
-    'EPOCHS': 3,
+    'EPOCHS': 2,
     'LR': 1e-4,
     
     # Hardware
     'DEVICE': get_device(),
     
     # Debug/Test
-    'LOAD_CHECKPOINT': False,
+    'LOAD_CHECKPOINT': True,
     'DEBUG_SUBSET_SIZE': 100,  # Set > 0 for debug mode
 }
 
