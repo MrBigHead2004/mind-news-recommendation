@@ -1,3 +1,5 @@
 .DS_Store
+__pycache__/
 /MIND
+/checkpoints
 news_rec_model_latest.pth
