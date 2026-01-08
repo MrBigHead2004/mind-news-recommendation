@@ -2,4 +2,3 @@
 __pycache__/
 /MIND
 /checkpoints
-news_rec_model_latest.pth

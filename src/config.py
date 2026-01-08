@@ -38,7 +38,7 @@ config = {
     'MAX_HISTORY_LEN': 20,
     'NEG_SAMPLES': 4,
     'BATCH_SIZE': 8,
-    'EPOCHS': 2,
+    'EPOCHS': 5,
     'LR': 1e-4,
     
     # Hardware
@@ -46,7 +46,7 @@ config = {
     
     # Debug/Test
     'LOAD_CHECKPOINT': True,
-    'DEBUG_SUBSET_SIZE': 100,  # Set > 0 for debug mode
+    'DEBUG_SUBSET_SIZE': 200,  # Set > 0 for debug mode
 }
 
 def print_config():
