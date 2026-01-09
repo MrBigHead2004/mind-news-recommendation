@@ -27,7 +27,10 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
         scores = model(hist_ids, hist_mask, cand_ids, cand_mask)
         
         # Compute loss
-        loss = criterion(scores, labels)
+        if hasattr(model, 'get_loss'):
+            loss = model.get_loss(scores, labels, criterion)
+        else:
+            loss = criterion(scores, labels)
         
         # Backward pass
         loss.backward()

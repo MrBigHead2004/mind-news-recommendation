@@ -21,6 +21,9 @@ def get_device():
     return torch.device('cpu')
 
 config = {
+    # Model Selection
+    'MODEL_TYPE': 'miner',  # 'nrms' | 'miner'
+    
     # Data Paths
     'NEWS_TRAIN_PATH': str(DATA_PATHS['news_train']),
     'NEWS_VAL_PATH': str(DATA_PATHS['news_val']),
@@ -47,6 +50,11 @@ config = {
     # Debug/Test
     'LOAD_CHECKPOINT': True,
     'DEBUG_SUBSET_SIZE': 100,  # Set > 0 for debug mode
+
+    # MINER Settings
+    'NUM_INTERESTS': 4,              # Number of interest vectors (K)
+    'INTEREST_AGGREGATION': 'max',   # 'max', 'avg', or 'weighted'
+    'DISAGREEMENT_WEIGHT': 0.1,      # Weight for disagreement loss
 }
 
 def print_config():
