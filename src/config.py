@@ -10,7 +10,7 @@ DATA_PATHS = {
     'behaviors_train': PROJECT_ROOT / 'MIND/MINDsmall_train/behaviors.tsv',
     'news_val': PROJECT_ROOT / 'MIND/MINDsmall_dev/news.tsv',
     'behaviors_val': PROJECT_ROOT / 'MIND/MINDsmall_dev/behaviors.tsv',
-    'checkpoint': PROJECT_ROOT / 'checkpoints/mind_news_rec.pth',
+    'checkpoint': PROJECT_ROOT / 'mind_news_rec.pth',
 }
 
 def get_device():
@@ -29,7 +29,7 @@ config = {
     'CHECKPOINT_PATH': str(DATA_PATHS['checkpoint']),
 
     # Model Settings
-    'MODEL_NAME': 'roberta-base',
+    'MODEL_NAME': 'xlnet-base-cased',
     'EMBEDDING_DIM': 768,
     'ATTENTION_QUERY_DIM': 200,
     
@@ -38,15 +38,15 @@ config = {
     'MAX_HISTORY_LEN': 20,
     'NEG_SAMPLES': 4,
     'BATCH_SIZE': 8,
-    'EPOCHS': 5,
-    'LR': 1e-4,
+    'EPOCHS': 3,
+    'LR': 4e-5,
     
     # Hardware
     'DEVICE': get_device(),
     
     # Debug/Test
     'LOAD_CHECKPOINT': True,
-    'DEBUG_SUBSET_SIZE': 200,  # Set > 0 for debug mode
+    'DEBUG_SUBSET_SIZE': 100,  # Set > 0 for debug mode
 }
 
 def print_config():
