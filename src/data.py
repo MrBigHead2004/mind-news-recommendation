@@ -7,20 +7,37 @@ import random
 from transformers import AutoTokenizer
 from src.config import config
 
+# MIND category mapping (18 categories + padding)
+CATEGORY_TO_ID = {
+    '<PAD>': 0,
+    'news': 1, 'sports': 2, 'finance': 3, 'entertainment': 4,
+    'autos': 5, 'lifestyle': 6, 'health': 7, 'travel': 8,
+    'foodanddrink': 9, 'tv': 10, 'music': 11, 'movies': 12,
+    'video': 13, 'kids': 14, 'middleeast': 15, 'northamerica': 16,
+    'weather': 17, 'other': 18
+}
+
+
 def load_news_data():
     """
-    Load news data from training and validation datasets.
+    Load news data with categories from training and validation datasets.
     """
     print(f"Loading News Articles from {config['NEWS_TRAIN_PATH']} and {config['NEWS_VAL_PATH']}...")
     
-    # Load training news
-    news_train_df = pd.read_csv(config['NEWS_TRAIN_PATH'], sep='\t', header=None, usecols=[0, 3])
-    news_train_df.columns = ['news_id', 'title'] # TODO: add other columns
+    # Load training news (including category - column 1)
+    news_train_df = pd.read_csv(
+        config['NEWS_TRAIN_PATH'], sep='\t', header=None, 
+        usecols=[0, 1, 3]  # news_id, category, title
+    )
+    news_train_df.columns = ['news_id', 'category', 'title']
     print(f"  Training news: {len(news_train_df):,} articles")
 
     # Load validation news
-    news_val_df = pd.read_csv(config['NEWS_VAL_PATH'], sep='\t', header=None, usecols=[0, 3])
-    news_val_df.columns = ['news_id', 'title'] # TODO: add other columns
+    news_val_df = pd.read_csv(
+        config['NEWS_VAL_PATH'], sep='\t', header=None, 
+        usecols=[0, 1, 3]
+    )
+    news_val_df.columns = ['news_id', 'category', 'title']
     print(f"  Validation news: {len(news_val_df):,} articles")
 
     # Combine and deduplicate (some news may appear in both)
@@ -28,6 +45,7 @@ def load_news_data():
     print(f"Loaded {len(news_df):,} unique news articles (combined)")
 
     return news_df
+
 
 def load_behaviors_data():
     """
@@ -55,17 +73,48 @@ def load_behaviors_data():
 
     return train_behaviors_df, val_behaviors_df
 
+
 def tokenize_news(news_df):
+    """
+    Tokenize news titles and create category mapping.
+    
+    Returns:
+        news_features: dict mapping news_id -> tokenized features
+        news_categories: dict mapping news_id -> category_id
+    """
     tokenizer = AutoTokenizer.from_pretrained(config['MODEL_NAME'])
     news_features = {}
+    news_categories = {}
 
     for _, row in tqdm(news_df.iterrows(), total=len(news_df), desc="Tokenizing"):
-        news_features[row['news_id']] = tokenizer(row['title'], max_length=config['MAX_TITLE_LEN'], padding='max_length', truncation=True, return_tensors='pt')
-    news_features['<PAD>'] = tokenizer("", max_length=config['MAX_TITLE_LEN'], padding='max_length', truncation=True, return_tensors='pt')
+        news_id = row['news_id']
+        news_features[news_id] = tokenizer(
+            row['title'], 
+            max_length=config['MAX_TITLE_LEN'], 
+            padding='max_length', 
+            truncation=True, 
+            return_tensors='pt'
+        )
+        # Map category to ID
+        category = row['category'].lower() if pd.notna(row['category']) else 'other'
+        news_categories[news_id] = CATEGORY_TO_ID.get(category, CATEGORY_TO_ID['other'])
     
-    return news_features
+    # Add padding entry
+    news_features['<PAD>'] = tokenizer(
+        "", 
+        max_length=config['MAX_TITLE_LEN'], 
+        padding='max_length', 
+        truncation=True, 
+        return_tensors='pt'
+    )
+    news_categories['<PAD>'] = 0
+    
+    print(f"Tokenized {len(news_features):,} news articles (including <PAD>)")
+    
+    return news_features, news_categories
 
-def create_behavior_samples(behaviors_df, dataset_type='train' or 'val'):
+
+def create_behavior_samples(behaviors_df, dataset_type='train'):
     """
     Create samples from user behaviors for training and validation.
 
@@ -75,8 +124,8 @@ def create_behavior_samples(behaviors_df, dataset_type='train' or 'val'):
     Returns:
         samples: list, List of samples
     """
-
     samples = []
+    
     for idx, row in tqdm(behaviors_df.iterrows(), total=len(behaviors_df), desc=f"Creating {dataset_type} samples"):
         history_str = str(row['history'])
         impressions_str = str(row['impressions'])

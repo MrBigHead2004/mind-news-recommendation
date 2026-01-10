@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class MultiHeadSelfAttention(nn.Module):
     """Multi-Head Self-Attention with residual connection and layer normalization."""
     
@@ -53,7 +54,7 @@ class PolyAttention(nn.Module):
         self.embed_dim = embed_dim
         
         # K learnable context codes (poly codes)
-        self.context_codes = nn.Parameter(torch.randn(num_interests, embed_dim))
+        self.context_codes = nn.Parameter(torch.empty(num_interests, embed_dim))
         nn.init.xavier_uniform_(self.context_codes)
         
         # Projection for computing attention
@@ -89,8 +90,9 @@ class PolyAttention(nn.Module):
             mask_expanded = history_mask.unsqueeze(1).expand(-1, self.num_interests, -1)
             scores = scores.masked_fill(mask_expanded == 0, -1e9)
         
-        # Softmax attention weights
+        # Softmax attention weights (with NaN protection for empty histories)
         attention_weights = F.softmax(scores, dim=-1)  # (batch, K, hist_len)
+        attention_weights = torch.nan_to_num(attention_weights, nan=0.0)
         attention_weights = self.dropout(attention_weights)
         
         # Weighted sum to get interest vectors: (batch, K, embed_dim)
@@ -98,3 +100,121 @@ class PolyAttention(nn.Module):
         interest_vectors = self.layer_norm(interest_vectors)
         
         return interest_vectors, attention_weights
+
+
+class CategoryAwarePolyAttention(nn.Module):
+    """
+    Poly Attention with Category-Aware Weighting (from MINER paper).
+    
+    Re-weights history news based on category similarity to candidate news,
+    capturing explicit interest signals.
+    """
+    
+    def __init__(self, embed_dim, num_interests=4, num_categories=18, dropout=0.2):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_interests = num_interests
+        
+        # Base poly attention
+        self.poly_attention = PolyAttention(embed_dim, num_interests, dropout)
+        
+        # Category embedding for explicit interest signals
+        self.category_embedding = nn.Embedding(num_categories + 1, embed_dim, padding_idx=0)
+        
+        # Gate to combine category similarity with content
+        self.category_gate = nn.Sequential(
+            nn.Linear(embed_dim * 2, embed_dim),
+            nn.Tanh(),
+            nn.Linear(embed_dim, 1),
+            nn.Sigmoid()
+        )
+        
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, history_vecs, history_mask=None, 
+                history_categories=None, candidate_categories=None):
+        """
+        Args:
+            history_vecs: (batch, hist_len, embed_dim)
+            history_mask: (batch, hist_len)
+            history_categories: (batch, hist_len) - category IDs for history news
+            candidate_categories: (batch, num_cand) - category IDs for candidates
+        Returns:
+            interest_vectors: (batch, num_interests, embed_dim)
+            attention_weights: (batch, num_interests, hist_len)
+        """
+        batch_size, hist_len, _ = history_vecs.shape
+        
+        # If categories provided, apply category-aware weighting
+        if history_categories is not None and candidate_categories is not None:
+            # Get category embeddings
+            hist_cat_emb = self.category_embedding(history_categories)  # (batch, hist_len, embed_dim)
+            cand_cat_emb = self.category_embedding(candidate_categories)  # (batch, num_cand, embed_dim)
+            
+            # Average candidate category embedding (for attention computation)
+            cand_cat_avg = cand_cat_emb.mean(dim=1)  # (batch, embed_dim)
+            cand_cat_expanded = cand_cat_avg.unsqueeze(1).expand(-1, hist_len, -1)
+            
+            # Compute category-aware gate
+            cat_features = torch.cat([hist_cat_emb, cand_cat_expanded], dim=-1)
+            cat_weights = self.category_gate(cat_features)  # (batch, hist_len, 1)
+            
+            # Apply category weighting to history vectors (residual style)
+            weighted_history = history_vecs * (1 + cat_weights)
+        else:
+            weighted_history = history_vecs
+        
+        # Apply poly attention on (potentially weighted) history
+        interest_vectors, attention_weights = self.poly_attention(weighted_history, history_mask)
+        
+        return interest_vectors, attention_weights
+
+
+class CandidateAwareAggregation(nn.Module):
+    """
+    Dynamically weight interests based on candidate news.
+    
+    Instead of fixed max/avg aggregation, learns which interests
+    are most relevant for each candidate.
+    """
+    
+    def __init__(self, embed_dim, dropout=0.2):
+        super().__init__()
+        self.attention = nn.Sequential(
+            nn.Linear(embed_dim * 2, embed_dim),
+            nn.Tanh(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim, 1)
+        )
+        
+    def forward(self, interest_vectors, candidate_vecs):
+        """
+        Args:
+            interest_vectors: (batch, K, embed_dim) - K interest vectors
+            candidate_vecs: (batch, num_cand, embed_dim) - candidate vectors
+        Returns:
+            scores: (batch, num_cand) - matching scores
+        """
+        batch_size, K, embed_dim = interest_vectors.shape
+        num_cand = candidate_vecs.size(1)
+        
+        # Expand for pairwise computation
+        # interests: (batch, K, 1, embed_dim) -> (batch, K, num_cand, embed_dim)
+        interests_exp = interest_vectors.unsqueeze(2).expand(-1, -1, num_cand, -1)
+        # candidates: (batch, 1, num_cand, embed_dim) -> (batch, K, num_cand, embed_dim)
+        cands_exp = candidate_vecs.unsqueeze(1).expand(-1, K, -1, -1)
+        
+        # Concatenate for attention
+        combined = torch.cat([interests_exp, cands_exp], dim=-1)  # (batch, K, num_cand, 2*embed_dim)
+        
+        # Compute attention weights per candidate
+        attn_scores = self.attention(combined).squeeze(-1)  # (batch, K, num_cand)
+        attn_weights = F.softmax(attn_scores, dim=1)  # Softmax over interests
+        
+        # Compute dot product scores
+        dot_scores = torch.einsum('bkd,bcd->bkc', interest_vectors, candidate_vecs)  # (batch, K, num_cand)
+        
+        # Weighted sum of scores
+        scores = (attn_weights * dot_scores).sum(dim=1)  # (batch, num_cand)
+        
+        return scores

@@ -5,7 +5,14 @@ from transformers import AutoModel
 
 from .base import BaseNewsRecommender
 from . import register_model
-from .attention import MultiHeadSelfAttention, AdditiveAttention, PolyAttention
+from .attention import (
+    MultiHeadSelfAttention, 
+    AdditiveAttention, 
+    PolyAttention,
+    CategoryAwarePolyAttention,
+    CandidateAwareAggregation
+)
+
 
 class NewsEncoder(nn.Module):
     """Encodes news titles: BERT → Self-Attention → Additive Attention → Vector"""
@@ -39,7 +46,7 @@ class NewsEncoder(nn.Module):
 
 class MultiInterestUserEncoder(nn.Module):
     """
-    Multi-Interest User Encoder using Poly Attention.
+    Multi-Interest User Encoder with optional Category-Aware attention.
     
     Extracts K interest vectors from user's click history instead of a single vector.
     """
@@ -47,6 +54,7 @@ class MultiInterestUserEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.num_interests = config.get('NUM_INTERESTS', 4)
+        self.use_category = config.get('USE_CATEGORY_ATTENTION', False)
         
         # Self-attention over history
         self.history_self_attention = MultiHeadSelfAttention(
@@ -55,20 +63,31 @@ class MultiInterestUserEncoder(nn.Module):
             dropout=config.get('DROPOUT', 0.2)
         )
         
-        # Poly attention for multi-interest extraction
-        self.poly_attention = PolyAttention(
-            config['EMBEDDING_DIM'],
-            num_interests=self.num_interests,
-            dropout=config.get('DROPOUT', 0.2)
-        )
+        # Poly attention (category-aware or standard)
+        if self.use_category:
+            self.poly_attention = CategoryAwarePolyAttention(
+                config['EMBEDDING_DIM'],
+                num_interests=self.num_interests,
+                num_categories=config.get('NUM_CATEGORIES', 18),
+                dropout=config.get('DROPOUT', 0.2)
+            )
+        else:
+            self.poly_attention = PolyAttention(
+                config['EMBEDDING_DIM'],
+                num_interests=self.num_interests,
+                dropout=config.get('DROPOUT', 0.2)
+            )
         
         self.dropout = nn.Dropout(config.get('DROPOUT', 0.2))
         
-    def forward(self, history_news_vecs, history_mask):
+    def forward(self, history_news_vecs, history_mask, 
+                history_categories=None, candidate_categories=None):
         """
         Args:
             history_news_vecs: (batch, hist_len, embed_dim)
             history_mask: (batch, hist_len)
+            history_categories: (batch, hist_len) - optional category IDs
+            candidate_categories: (batch, num_cand) - optional category IDs
         Returns:
             interest_vectors: (batch, num_interests, embed_dim)
         """
@@ -77,7 +96,12 @@ class MultiInterestUserEncoder(nn.Module):
         history_vecs = self.dropout(history_vecs)
         
         # Extract multiple interest vectors
-        interest_vectors, _ = self.poly_attention(history_vecs, history_mask)
+        if self.use_category and history_categories is not None:
+            interest_vectors, _ = self.poly_attention(
+                history_vecs, history_mask, history_categories, candidate_categories
+            )
+        else:
+            interest_vectors, _ = self.poly_attention(history_vecs, history_mask)
         
         return interest_vectors
 
@@ -93,6 +117,12 @@ def compute_disagreement_loss(interest_vectors):
     Returns:
         disagreement_loss: scalar tensor
     """
+    batch_size, num_interests, _ = interest_vectors.shape
+    
+    # No disagreement loss needed for single interest
+    if num_interests <= 1:
+        return torch.tensor(0.0, device=interest_vectors.device)
+    
     # Normalize interest vectors
     normalized = F.normalize(interest_vectors, p=2, dim=-1)  # (batch, K, embed_dim)
     
@@ -100,7 +130,6 @@ def compute_disagreement_loss(interest_vectors):
     similarity_matrix = torch.bmm(normalized, normalized.transpose(1, 2))
     
     # Create mask to exclude diagonal (self-similarity)
-    batch_size, num_interests, _ = similarity_matrix.shape
     mask = ~torch.eye(num_interests, dtype=torch.bool, device=similarity_matrix.device)
     mask = mask.unsqueeze(0).expand(batch_size, -1, -1)
     
@@ -111,17 +140,61 @@ def compute_disagreement_loss(interest_vectors):
     return disagreement_loss
 
 
+def compute_contrastive_interest_loss(interest_vectors, temperature=0.1):
+    """
+    Contrastive loss (InfoNCE-style) to further separate interests.
+    
+    Each interest should be most similar to itself across the batch,
+    dissimilar to other interests.
+    
+    Args:
+        interest_vectors: (batch, num_interests, embed_dim)
+        temperature: scaling factor for softmax
+    Returns:
+        contrastive_loss: scalar tensor
+    """
+    batch_size, K, dim = interest_vectors.shape
+    
+    if K <= 1:
+        return torch.tensor(0.0, device=interest_vectors.device)
+    
+    # Normalize
+    normalized = F.normalize(interest_vectors, dim=-1)
+    
+    # Compute similarity matrix within each sample: (batch, K, K)
+    sim = torch.bmm(normalized, normalized.transpose(1, 2)) / temperature
+    
+    # For contrastive: each interest should have highest self-similarity
+    # Create labels: diagonal indices
+    labels = torch.arange(K, device=interest_vectors.device)
+    labels = labels.unsqueeze(0).expand(batch_size, -1)  # (batch, K)
+    
+    # Compute cross-entropy loss
+    # Reshape for cross_entropy: (batch * K, K)
+    sim_flat = sim.view(-1, K)
+    labels_flat = labels.reshape(-1)
+    
+    loss = F.cross_entropy(sim_flat, labels_flat)
+    
+    return loss
+
+
 @register_model('miner')
 class MINER(BaseNewsRecommender):
     """
-    MINER: Multi-Interest Matching Network for News Recommendation
+    MINER: Multi-Interest Matching Network for News Recommendation (Enhanced)
     
     Paper: https://aclanthology.org/2022.findings-acl.29.pdf
     
     Key features:
     1. Poly Attention: Extracts multiple interest vectors per user
     2. Disagreement Regularization: Encourages diversity among interests
-    3. Flexible matching: max/avg/weighted aggregation of interest scores
+    3. Flexible matching: max/avg/weighted/candidate_aware aggregation
+    
+    Enhancements:
+    - Category-Aware Poly Attention (from paper)
+    - Candidate-Aware Interest Aggregation
+    - Contrastive Interest Loss
     """
     
     def __init__(self, config):
@@ -130,18 +203,27 @@ class MINER(BaseNewsRecommender):
         self.user_encoder = MultiInterestUserEncoder(config)
         
         self.num_interests = config.get('NUM_INTERESTS', 4)
-        self.aggregation = config.get('INTEREST_AGGREGATION', 'max')  # 'max', 'avg', or 'weighted'
+        self.aggregation = config.get('INTEREST_AGGREGATION', 'candidate_aware')
         self.disagreement_weight = config.get('DISAGREEMENT_WEIGHT', 0.1)
+        self.contrastive_weight = config.get('CONTRASTIVE_WEIGHT', 0.05)
+        self.use_category = config.get('USE_CATEGORY_ATTENTION', False)
         
-        # For weighted aggregation
+        # Aggregation methods
         if self.aggregation == 'weighted':
             self.interest_weights = nn.Linear(config['EMBEDDING_DIM'], 1)
+        elif self.aggregation == 'candidate_aware':
+            self.candidate_aggregation = CandidateAwareAggregation(
+                config['EMBEDDING_DIM'],
+                dropout=config.get('DROPOUT', 0.2)
+            )
         
-        # Store disagreement loss for training
+        # Store losses for training
         self.last_disagreement_loss = None
+        self.last_contrastive_loss = None
         
     def forward(self, history_input_ids, history_attn_mask, 
-                candidate_input_ids, candidate_attn_mask):
+                candidate_input_ids, candidate_attn_mask,
+                history_categories=None, candidate_categories=None):
         batch_size = history_input_ids.size(0)
         
         # Encode history news
@@ -154,10 +236,13 @@ class MINER(BaseNewsRecommender):
         hist_pool_mask = (history_attn_mask.sum(dim=2) > 0).long()
         
         # Get multiple user interest vectors: (batch, num_interests, embed_dim)
-        interest_vectors = self.user_encoder(hist_vecs, hist_pool_mask)
+        interest_vectors = self.user_encoder(
+            hist_vecs, hist_pool_mask, history_categories, candidate_categories
+        )
         
-        # Compute disagreement loss for regularization
+        # Compute regularization losses
         self.last_disagreement_loss = compute_disagreement_loss(interest_vectors)
+        self.last_contrastive_loss = compute_contrastive_interest_loss(interest_vectors)
         
         # Encode candidate news
         num_candidates = candidate_input_ids.size(1)
@@ -166,26 +251,23 @@ class MINER(BaseNewsRecommender):
         cand_vecs = self.news_encoder(cand_flat_input, cand_flat_mask)
         cand_vecs = cand_vecs.view(batch_size, num_candidates, -1)
         
-        # Multi-interest matching
-        # Compute scores for each interest: (batch, num_interests, num_candidates)
-        # interest_vectors: (batch, K, embed_dim)
-        # cand_vecs: (batch, num_candidates, embed_dim)
-        interest_scores = torch.bmm(interest_vectors, cand_vecs.transpose(1, 2))
-        
-        # Aggregate scores across interests
+        # Multi-interest matching with selected aggregation
         if self.aggregation == 'max':
             # Take maximum score across all interests
-            scores, _ = interest_scores.max(dim=1)  # (batch, num_candidates)
+            interest_scores = torch.bmm(interest_vectors, cand_vecs.transpose(1, 2))
+            scores, _ = interest_scores.max(dim=1)
         elif self.aggregation == 'avg':
             # Average scores across all interests
-            scores = interest_scores.mean(dim=1)  # (batch, num_candidates)
+            interest_scores = torch.bmm(interest_vectors, cand_vecs.transpose(1, 2))
+            scores = interest_scores.mean(dim=1)
         elif self.aggregation == 'weighted':
             # Weighted sum based on learned interest importance
-            interest_weights = F.softmax(
-                self.interest_weights(interest_vectors).squeeze(-1), 
-                dim=1
-            )  # (batch, num_interests)
-            scores = torch.einsum('bk,bkc->bc', interest_weights, interest_scores)
+            interest_scores = torch.bmm(interest_vectors, cand_vecs.transpose(1, 2))
+            weights = F.softmax(self.interest_weights(interest_vectors).squeeze(-1), dim=1)
+            scores = torch.einsum('bk,bkc->bc', weights, interest_scores)
+        elif self.aggregation == 'candidate_aware':
+            # Candidate-aware aggregation: dynamically weight interests per candidate
+            scores = self.candidate_aggregation(interest_vectors, cand_vecs)
         else:
             raise ValueError(f"Unknown aggregation method: {self.aggregation}")
         
@@ -193,7 +275,7 @@ class MINER(BaseNewsRecommender):
     
     def get_loss(self, scores, labels, criterion):
         """
-        Compute total loss including disagreement regularization.
+        Compute total loss including all regularizations.
         
         Args:
             scores: (batch, num_candidates) - model predictions
@@ -203,10 +285,14 @@ class MINER(BaseNewsRecommender):
             total_loss: scalar tensor
         """
         base_loss = criterion(scores, labels)
+        total_loss = base_loss
         
+        # Add disagreement loss
         if self.last_disagreement_loss is not None and self.disagreement_weight > 0:
-            total_loss = base_loss + self.disagreement_weight * self.last_disagreement_loss
-        else:
-            total_loss = base_loss
+            total_loss = total_loss + self.disagreement_weight * self.last_disagreement_loss
+        
+        # Add contrastive loss
+        if self.last_contrastive_loss is not None and self.contrastive_weight > 0:
+            total_loss = total_loss + self.contrastive_weight * self.last_contrastive_loss
             
         return total_loss
