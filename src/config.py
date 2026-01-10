@@ -53,7 +53,7 @@ config = {
 
     # MINER Settings
     'NUM_INTERESTS': 4,              # Number of interest vectors (K)
-    'INTEREST_AGGREGATION': 'max',   # 'max', 'avg', or 'weighted'
+    'INTEREST_AGGREGATION': 'weighted',   # 'max', 'avg', or 'weighted'
     'DISAGREEMENT_WEIGHT': 0.1,      # Weight for disagreement loss
 }
 
