@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 from sklearn.metrics import roc_auc_score
+from src.config import config
 
 def calculate_mrr(y_true, y_score, k=10):
     """
@@ -94,7 +95,13 @@ def evaluate_with_metrics(model, dataloader, device, k_values=[5, 10]):
             labels = batch['label'].numpy()
             
             # Forward pass
-            scores = model(hist_ids, hist_mask, cand_ids, cand_mask)
+            if config.get('USE_CATEGORY_ATTENTION', False) and 'history_categories' in batch:
+                hist_cats = batch['history_categories'].to(device)
+                cand_cats = batch['candidate_categories'].to(device)
+                scores = model(hist_ids, hist_mask, cand_ids, cand_mask, hist_cats, cand_cats)
+            else:
+                scores = model(hist_ids, hist_mask, cand_ids, cand_mask)
+                
             scores = scores.cpu().numpy().flatten()
             
             # Collect for AUC

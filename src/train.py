@@ -23,8 +23,12 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
         cand_mask = batch['candidate_attn_mask'].to(device)
         labels = batch['label'].to(device)
         
-        # Forward pass
-        scores = model(hist_ids, hist_mask, cand_ids, cand_mask)
+        if config.get('USE_CATEGORY_ATTENTION', False):
+            hist_cats = batch['history_categories'].to(device)
+            cand_cats = batch['candidate_categories'].to(device)
+            scores = model(hist_ids, hist_mask, cand_ids, cand_mask, hist_cats, cand_cats)
+        else:
+            scores = model(hist_ids, hist_mask, cand_ids, cand_mask)
         
         # Compute loss
         if hasattr(model, 'get_loss'):

@@ -139,46 +139,6 @@ def compute_disagreement_loss(interest_vectors):
     
     return disagreement_loss
 
-
-def compute_contrastive_interest_loss(interest_vectors, temperature=0.1):
-    """
-    Contrastive loss (InfoNCE-style) to further separate interests.
-    
-    Each interest should be most similar to itself across the batch,
-    dissimilar to other interests.
-    
-    Args:
-        interest_vectors: (batch, num_interests, embed_dim)
-        temperature: scaling factor for softmax
-    Returns:
-        contrastive_loss: scalar tensor
-    """
-    batch_size, K, dim = interest_vectors.shape
-    
-    if K <= 1:
-        return torch.tensor(0.0, device=interest_vectors.device)
-    
-    # Normalize
-    normalized = F.normalize(interest_vectors, dim=-1)
-    
-    # Compute similarity matrix within each sample: (batch, K, K)
-    sim = torch.bmm(normalized, normalized.transpose(1, 2)) / temperature
-    
-    # For contrastive: each interest should have highest self-similarity
-    # Create labels: diagonal indices
-    labels = torch.arange(K, device=interest_vectors.device)
-    labels = labels.unsqueeze(0).expand(batch_size, -1)  # (batch, K)
-    
-    # Compute cross-entropy loss
-    # Reshape for cross_entropy: (batch * K, K)
-    sim_flat = sim.view(-1, K)
-    labels_flat = labels.reshape(-1)
-    
-    loss = F.cross_entropy(sim_flat, labels_flat)
-    
-    return loss
-
-
 @register_model('miner')
 class MINER(BaseNewsRecommender):
     """
@@ -194,7 +154,6 @@ class MINER(BaseNewsRecommender):
     Enhancements:
     - Category-Aware Poly Attention (from paper)
     - Candidate-Aware Interest Aggregation
-    - Contrastive Interest Loss
     """
     
     def __init__(self, config):
@@ -205,7 +164,6 @@ class MINER(BaseNewsRecommender):
         self.num_interests = config.get('NUM_INTERESTS', 4)
         self.aggregation = config.get('INTEREST_AGGREGATION', 'candidate_aware')
         self.disagreement_weight = config.get('DISAGREEMENT_WEIGHT', 0.1)
-        self.contrastive_weight = config.get('CONTRASTIVE_WEIGHT', 0.05)
         self.use_category = config.get('USE_CATEGORY_ATTENTION', False)
         
         # Aggregation methods
@@ -219,7 +177,6 @@ class MINER(BaseNewsRecommender):
         
         # Store losses for training
         self.last_disagreement_loss = None
-        self.last_contrastive_loss = None
         
     def forward(self, history_input_ids, history_attn_mask, 
                 candidate_input_ids, candidate_attn_mask,
@@ -242,7 +199,6 @@ class MINER(BaseNewsRecommender):
         
         # Compute regularization losses
         self.last_disagreement_loss = compute_disagreement_loss(interest_vectors)
-        self.last_contrastive_loss = compute_contrastive_interest_loss(interest_vectors)
         
         # Encode candidate news
         num_candidates = candidate_input_ids.size(1)
@@ -291,8 +247,4 @@ class MINER(BaseNewsRecommender):
         if self.last_disagreement_loss is not None and self.disagreement_weight > 0:
             total_loss = total_loss + self.disagreement_weight * self.last_disagreement_loss
         
-        # Add contrastive loss
-        if self.last_contrastive_loss is not None and self.contrastive_weight > 0:
-            total_loss = total_loss + self.contrastive_weight * self.last_contrastive_loss
-            
         return total_loss

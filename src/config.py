@@ -57,7 +57,6 @@ config = {
     'NUM_INTERESTS': 4,                      # Number of interest vectors (K)
     'INTEREST_AGGREGATION': 'candidate_aware',  # 'max', 'avg', 'weighted', 'candidate_aware'
     'DISAGREEMENT_WEIGHT': 0.1,              # Weight for disagreement loss
-    'CONTRASTIVE_WEIGHT': 0.05,              # Weight for contrastive loss
     
     # Category-Aware Settings
     'USE_CATEGORY_ATTENTION': True,          # Enable category-aware poly attention
