@@ -95,12 +95,7 @@ def evaluate_with_metrics(model, dataloader, device, k_values=[5, 10]):
             labels = batch['label'].numpy()
             
             # Forward pass
-            if config.get('USE_CATEGORY_ATTENTION', False) and 'history_categories' in batch:
-                hist_cats = batch['history_categories'].to(device)
-                cand_cats = batch['candidate_categories'].to(device)
-                scores = model(hist_ids, hist_mask, cand_ids, cand_mask, hist_cats, cand_cats)
-            else:
-                scores = model(hist_ids, hist_mask, cand_ids, cand_mask)
+            scores = model(hist_ids, hist_mask, cand_ids, cand_mask)
                 
             scores = scores.cpu().numpy().flatten()
             

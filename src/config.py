@@ -22,7 +22,7 @@ def get_device():
 
 config = {
     # Model Selection
-    'MODEL_TYPE': 'miner',  # 'nrms' | 'miner'
+    'MODEL_TYPE': 'nrms',
     
     # Data Paths
     'NEWS_TRAIN_PATH': str(DATA_PATHS['news_train']),
@@ -50,17 +50,8 @@ config = {
     'DEVICE': get_device(),
     
     # Debug/Test
-    'LOAD_CHECKPOINT': True,  # Set to False for fresh training with new model
+    'LOAD_CHECKPOINT': False,  # Set to False for fresh training with new model
     'DEBUG_SUBSET_SIZE': 100,  # Set > 0 for debug mode
-
-    # MINER Settings
-    'NUM_INTERESTS': 4,                      # Number of interest vectors (K)
-    'INTEREST_AGGREGATION': 'candidate_aware',  # 'max', 'avg', 'weighted', 'candidate_aware'
-    'DISAGREEMENT_WEIGHT': 0.1,              # Weight for disagreement loss
-    
-    # Category-Aware Settings
-    'USE_CATEGORY_ATTENTION': True,          # Enable category-aware poly attention
-    'NUM_CATEGORIES': 18,                    # MIND has 18 categories
 }
 
 def print_config():

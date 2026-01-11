@@ -28,4 +28,3 @@ def list_models() -> list:
 
 # Import models to trigger registration
 from .nrms import NRMS
-from .miner import MINER

@@ -161,34 +161,9 @@ def predict_impression(model, news_vectors, history, candidates, model_config, d
     # Compute scores using user encoder
     with torch.no_grad():
         # Encode user from history
-        if hasattr(model, 'user_encoder'):
-            user_vector = model.user_encoder(hist_vecs, hist_mask)
-            
-            # For MINER model with multi-interest
-            if user_vector.dim() == 3:  # (batch, num_interests, embed_dim)
-                # Multi-interest scoring
-                interest_scores = torch.bmm(user_vector, cand_vecs.transpose(1, 2))  # (1, K, num_cands)
-                
-                if model.aggregation == 'max':
-                    scores, _ = interest_scores.max(dim=1)
-                elif model.aggregation == 'avg':
-                    scores = interest_scores.mean(dim=1)
-                elif model.aggregation == 'weighted':
-                    import torch.nn.functional as F
-                    interest_weights = F.softmax(
-                        model.interest_weights(user_vector).squeeze(-1), 
-                        dim=1
-                    )
-                    scores = torch.einsum('bk,bkc->bc', interest_weights, interest_scores)
-                else:
-                    scores, _ = interest_scores.max(dim=1)
-            else:
-                # Single user vector - dot product
-                scores = torch.bmm(cand_vecs, user_vector.unsqueeze(-1)).squeeze(-1)
-        else:
-            # Fallback: use full forward pass
-            # This is less efficient but works for any model architecture
-            scores = model.forward_from_vectors(hist_vecs, hist_mask, cand_vecs)
+        user_vector = model.user_encoder(hist_vecs, hist_mask)
+        # Single user vector - dot product
+        scores = torch.bmm(cand_vecs, user_vector.unsqueeze(-1)).squeeze(-1)
     
     scores = scores.squeeze(0).cpu().numpy()
     
