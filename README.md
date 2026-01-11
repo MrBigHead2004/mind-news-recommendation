@@ -31,6 +31,21 @@ This project implements a neural news recommendation system that learns to predi
 
 ## 🚀 Quick Start
 
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/mind-news-recommendation.git
+cd mind-news-recommendation
+
+# Create virtual environment (optional but recommended)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
 ### Download Dataset
 
 The project uses the MIND dataset from Kaggle:
